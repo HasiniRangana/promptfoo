@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 
-import { and, eq, gte, inArray, lt } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import { getDb, getDbAsync, withTransaction, supportsReturning } from '../database/index';
 import { evalResultsTable } from '../database/dynamic-tables';
 import { getEnvBool } from '../envars';
@@ -8,6 +8,7 @@ import { hashPrompt } from '../prompts/utils';
 import { type EvaluateResult } from '../types/index';
 import { isApiProvider, isProviderOptions } from '../types/providers';
 import { safeJsonStringify } from '../util/json';
+import { enhanceMetadataWithProjectInfo } from '../util/projectName';
 import { getCurrentTimestamp } from '../util/time';
 
 import type {
@@ -144,7 +145,7 @@ export default class EvalResult {
       provider: sanitizeProvider(provider),
       latencyMs,
       cost,
-      metadata,
+      metadata: enhanceMetadataWithProjectInfo(metadata),
       failureReason,
     };
     
@@ -205,7 +206,7 @@ export default class EvalResult {
             namedScores: result.namedScores || {},
             latencyMs: result.latencyMs || 0,
             cost: result.cost || 0,
-            metadata: result.metadata || {},
+            metadata: enhanceMetadataWithProjectInfo(result.metadata || {}),
           };
           
           if (supportsReturning()) {
@@ -241,7 +242,7 @@ export default class EvalResult {
           namedScores: result.namedScores || {},
           latencyMs: result.latencyMs || 0,
           cost: result.cost || 0,
-          metadata: result.metadata || {},
+          metadata: enhanceMetadataWithProjectInfo(result.metadata || {}),
           persisted: false,
         });
         EvalResult.remember(fallback);
@@ -397,6 +398,109 @@ export default class EvalResult {
       console.warn('Failed to find results in batches:', error);
       const batchSize = opts?.batchSize || 100;
       yield* EvalResult.memoryBatches(evalId, batchSize);
+    }
+  }
+
+  /**
+   * Find evaluation results by project name
+   * This allows filtering results in the dashboard by project
+   */
+  static async findManyByProjectName(projectName: string, opts?: { 
+    limit?: number; 
+    offset?: number;
+    evalId?: string;
+  }): Promise<EvalResult[]> {
+    try {
+      const db = await getDbAsync();
+      if (!db || typeof db.select !== 'function') {
+        console.warn('Database connection is not properly initialized');
+        // Fallback to in-memory search
+        const allResults = Array.from(EvalResult.inMemoryStore.values());
+        return allResults.filter(result => 
+          result.metadata.projectName === projectName &&
+          (!opts?.evalId || result.evalId === opts.evalId)
+        ).slice(opts?.offset || 0, (opts?.offset || 0) + (opts?.limit || 100));
+      }
+
+      let whereConditions = [
+        // Use JSON extraction to filter by projectName in metadata
+        // This works for both MySQL and SQLite with JSON support
+        eq(sql`JSON_EXTRACT(${evalResultsTable.metadata}, '$.projectName')`, projectName)
+      ];
+
+      if (opts?.evalId) {
+        whereConditions.push(eq(evalResultsTable.evalId, opts.evalId));
+      }
+
+      let query = db
+        .select()
+        .from(evalResultsTable)
+        .where(and(...whereConditions));
+
+      if (opts?.limit) {
+        query = query.limit(opts.limit);
+      }
+      if (opts?.offset) {
+        query = query.offset(opts.offset);
+      }
+
+      const rows = await query.all();
+      const evalResults = rows.map((row: any) => new EvalResult({ ...row, persisted: true }));
+      EvalResult.rememberMany(evalResults);
+      return evalResults;
+    } catch (error) {
+      console.warn('Failed to find results by project name:', error);
+      // Fallback to in-memory search
+      const allResults = Array.from(EvalResult.inMemoryStore.values());
+      return allResults.filter(result => 
+        result.metadata.projectName === projectName &&
+        (!opts?.evalId || result.evalId === opts.evalId)
+      ).slice(opts?.offset || 0, (opts?.offset || 0) + (opts?.limit || 100));
+    }
+  }
+
+  /**
+   * Get all unique project names from stored evaluation results
+   */
+  static async getProjectNames(): Promise<string[]> {
+    try {
+      const db = await getDbAsync();
+      if (!db || typeof db.select !== 'function') {
+        console.warn('Database connection is not properly initialized');
+        // Fallback to in-memory search
+        const allResults = Array.from(EvalResult.inMemoryStore.values());
+        const projectNames = new Set<string>();
+        allResults.forEach(result => {
+          if (result.metadata.projectName) {
+            projectNames.add(result.metadata.projectName);
+          }
+        });
+        return Array.from(projectNames);
+      }
+
+      // Use JSON extraction to get unique project names
+      const rows = await db
+        .selectDistinct({
+          projectName: sql`JSON_EXTRACT(${evalResultsTable.metadata}, '$.projectName')`
+        })
+        .from(evalResultsTable)
+        .where(sql`JSON_EXTRACT(${evalResultsTable.metadata}, '$.projectName') IS NOT NULL`)
+        .all();
+
+      return rows
+        .map((row: any) => row.projectName)
+        .filter((name: string) => name && name !== 'null');
+    } catch (error) {
+      console.warn('Failed to get project names:', error);
+      // Fallback to in-memory search
+      const allResults = Array.from(EvalResult.inMemoryStore.values());
+      const projectNames = new Set<string>();
+      allResults.forEach(result => {
+        if (result.metadata.projectName) {
+          projectNames.add(result.metadata.projectName);
+        }
+      });
+      return Array.from(projectNames);
     }
   }
 
