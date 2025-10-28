@@ -2,7 +2,7 @@
   "name": "@hasinirangana/promptfoo-mysql",
   "description": "LLM eval & testing toolkit with MySQL integration",
   "author": "Hasini Rangana",
-  "version": "0.118.44",
+  "version": "0.118.48",
   "license": "MIT",
   "type": "commonjs",
   "repository": {
