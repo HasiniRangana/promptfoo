@@ -1,0 +1,60 @@
+# Sample Test Data
+# This file contains test datasets that can be imported into test cases
+
+# Customer service scenarios
+customer_service_scenarios:
+  - question: "How do I return a defective product?"
+    expected_topics: ["return policy", "defective", "process"]
+    sentiment: "concerned"
+    
+  - question: "What's your shipping policy for international orders?"
+    expected_topics: ["shipping", "international", "policy"]
+    sentiment: "neutral"
+    
+  - question: "I'm very unhappy with my recent purchase!"
+    expected_topics: ["complaint", "purchase", "dissatisfaction"]
+    sentiment: "negative"
+
+# Technical support questions
+technical_questions:
+  - question: "How do I reset my password?"
+    category: "authentication"
+    difficulty: "easy"
+    
+  - question: "The application crashes when I try to export data"
+    category: "bug_report"
+    difficulty: "medium"
+    
+  - question: "Can you help me integrate your API with my existing system?"
+    category: "integration"
+    difficulty: "hard"
+
+# Educational content
+educational_prompts:
+  - topic: "photosynthesis"
+    audience: "middle_school"
+    explanation_type: "simple"
+    
+  - topic: "quantum computing"
+    audience: "undergraduate"
+    explanation_type: "technical"
+    
+  - topic: "machine learning"
+    audience: "business_executive"
+    explanation_type: "business_focused"
+
+# Code review scenarios
+code_samples:
+  - language: "python"
+    code: |
+      def calculate_average(numbers):
+          return sum(numbers) / len(numbers)
+    issues: ["no error handling for empty list", "no input validation"]
+    
+  - language: "javascript"
+    code: |
+      function getUserData(userId) {
+          return fetch('/api/users/' + userId)
+              .then(response => response.json());
+      }
+    issues: ["no error handling", "potential security issue with string concatenation"]

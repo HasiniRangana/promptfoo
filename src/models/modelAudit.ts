@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm';
 import { getDb } from '../database/index';
-import { modelAuditsTable } from '../database/tables';
+import { modelAuditsTable } from '../database/dynamic-tables';
 import logger from '../logger';
 import { randomSequence } from '../util/createHash';
 

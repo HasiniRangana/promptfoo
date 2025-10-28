@@ -1,0 +1,34 @@
+{
+  "name": "sample-promptfoo-test-package",
+  "version": "1.0.0",
+  "description": "A comprehensive sample test package for Promptfoo LLM evaluation",
+  "main": "index.js",
+  "scripts": {
+    "test": "promptfoo eval",
+    "test:basic": "promptfoo eval -c promptfooconfig.yaml",
+    "test:advanced": "promptfoo eval -c advanced-config.yaml",
+    "view": "promptfoo view",
+    "view:basic": "promptfoo view --config promptfooconfig.yaml",
+    "view:advanced": "promptfoo view --config advanced-config.yaml",
+    "clean": "rm -rf test-results advanced-test-results",
+    "setup": "npm install && echo 'Please set your OPENAI_API_KEY environment variable'"
+  },
+  "dependencies": {
+    "promptfoo": "^0.118.14"
+  },
+  "devDependencies": {},
+  "keywords": [
+    "promptfoo",
+    "llm",
+    "testing",
+    "evaluation",
+    "ai",
+    "sample",
+    "demo"
+  ],
+  "author": "Promptfoo Sample Package",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

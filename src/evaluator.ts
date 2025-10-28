@@ -853,9 +853,7 @@ class Evaluator {
                 ...test.vars,
               },
               options: {
-                ...(typeof testSuite.defaultTest === 'object'
-                  ? testSuite.defaultTest?.options
-                  : {}),
+                ...(typeof testSuite.defaultTest === 'object' ? testSuite.defaultTest?.options : {}),
                 ...test.options,
               },
               assert: [
@@ -864,9 +862,7 @@ class Evaluator {
                 ...(test.assert || []),
               ],
               metadata: {
-                ...(typeof testSuite.defaultTest === 'object'
-                  ? testSuite.defaultTest?.metadata
-                  : {}),
+                ...(typeof testSuite.defaultTest === 'object' ? testSuite.defaultTest?.metadata : {}),
                 ...data.metadata,
                 ...test.metadata,
               },
@@ -1519,7 +1515,7 @@ class Evaluator {
       }
 
       const compareAssertion = resultsToCompare[0].testCase.assert?.find(
-        (a) => a.type === 'select-best',
+        (a: Assertion) => a.type === 'select-best',
       ) as Assertion;
       if (compareAssertion) {
         const outputs = resultsToCompare.map((r) => r.response?.output || '');

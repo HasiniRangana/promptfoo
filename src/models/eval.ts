@@ -2,7 +2,15 @@ import { randomUUID } from 'crypto';
 
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { DEFAULT_QUERY_LIMIT } from '../constants';
-import { getDb } from '../database/index';
+import {
+  closeDb,
+  convertDateForDb,
+  getDb,
+  getDbAsync,
+  shouldUseMysql,
+  withTransaction,
+  executeInsertWithConflictHandling,
+} from '../database/index.js';
 import { updateSignalFile } from '../database/signal';
 import {
   datasetsTable,
@@ -13,7 +21,7 @@ import {
   evalsToTagsTable,
   promptsTable,
   tagsTable,
-} from '../database/tables';
+} from '../database/dynamic-tables';
 import { getEnvBool } from '../envars';
 import { getUserEmail } from '../globalConfig/accounts';
 import logger from '../logger';
@@ -90,7 +98,7 @@ export class EvalQueries {
     const db = getDb();
     const query = sql.raw(
       `SELECT DISTINCT j.key, eval_id from (SELECT eval_id, json_extract(eval_results.test_case, '$.vars') as vars
-FROM eval_results where eval_id IN (${evals.map((e) => `'${e.id}'`).join(',')})) t, json_each(t.vars) j;`,
+FROM eval_results where eval_id IN (${evals.map((e: Eval) => `'${e.id}'`).join(',')})) t, json_each(t.vars) j;`,
     );
     // @ts-ignore
     const results: { key: string; eval_id: string }[] = await db.all(query);
@@ -280,15 +288,14 @@ export default class Eval {
     const createdAt = opts?.createdAt || new Date();
     const evalId = opts?.id || createEvalId(createdAt);
     const author = opts?.author || getUserEmail();
-    const db = getDb();
 
     const datasetId = sha256(JSON.stringify(config.tests || []));
 
-    db.transaction(() => {
-      db.insert(evalsTable)
+    await withTransaction(async (db) => {
+      await db.insert(evalsTable)
         .values({
           id: evalId,
-          createdAt: createdAt.getTime(),
+          createdAt: convertDateForDb(createdAt),
           author,
           description: config.description,
           config,
@@ -296,55 +303,45 @@ export default class Eval {
           vars: opts?.vars || [],
           runtimeOptions: sanitizeRuntimeOptions(opts?.runtimeOptions),
           prompts: opts?.completedPrompts || [],
-        })
-        .run();
+        });
 
       for (const prompt of renderedPrompts) {
         const label = prompt.label || prompt.display || prompt.raw;
         const promptId = hashPrompt(prompt);
 
-        db.insert(promptsTable)
+        await executeInsertWithConflictHandling(db.insert(promptsTable)
           .values({
             id: promptId,
             prompt: label,
-          })
-          .onConflictDoNothing()
-          .run();
+          }));
 
-        db.insert(evalsToPromptsTable)
+        await executeInsertWithConflictHandling(db.insert(evalsToPromptsTable)
           .values({
             evalId,
             promptId,
-          })
-          .onConflictDoNothing()
-          .run();
+          }));
 
         logger.debug(`Inserting prompt ${promptId}`);
       }
 
       if (opts?.results && opts.results.length > 0) {
-        const res = db
+        await db
           .insert(evalResultsTable)
-          .values(opts.results?.map((r) => ({ ...r, evalId, id: randomUUID() })))
-          .run();
-        logger.debug(`Inserted ${res.changes} eval results`);
+          .values(opts.results?.map((r) => ({ ...r, evalId, id: randomUUID() })));
+        logger.debug(`Inserted eval results`);
       }
 
-      db.insert(datasetsTable)
+      await executeInsertWithConflictHandling(db.insert(datasetsTable)
         .values({
           id: datasetId,
           tests: config.tests,
-        })
-        .onConflictDoNothing()
-        .run();
+        }));
 
-      db.insert(evalsToDatasetsTable)
+      await executeInsertWithConflictHandling(db.insert(evalsToDatasetsTable)
         .values({
           evalId,
           datasetId,
-        })
-        .onConflictDoNothing()
-        .run();
+        }));
 
       logger.debug(`Inserting dataset ${datasetId}`);
 
@@ -352,22 +349,18 @@ export default class Eval {
         for (const [tagKey, tagValue] of Object.entries(config.tags)) {
           const tagId = sha256(`${tagKey}:${tagValue}`);
 
-          db.insert(tagsTable)
+          await executeInsertWithConflictHandling(db.insert(tagsTable)
             .values({
               id: tagId,
               name: tagKey,
               value: tagValue,
-            })
-            .onConflictDoNothing()
-            .run();
+            }));
 
-          db.insert(evalsToTagsTable)
+          await executeInsertWithConflictHandling(db.insert(evalsToTagsTable)
             .values({
               evalId,
               tagId,
-            })
-            .onConflictDoNothing()
-            .run();
+            }));
 
           logger.debug(`Inserting tag ${tagId}`);
         }
@@ -664,7 +657,7 @@ export default class Eval {
       `SELECT COUNT(DISTINCT test_idx) as count FROM eval_results WHERE ${whereSql}`,
     );
     const countStart = Date.now();
-    const countResult = await db.get<FilteredCountRow>(filteredCountQuery);
+    const countResult = (await db.all(filteredCountQuery))[0] as FilteredCountRow | undefined;
     const countEnd = Date.now();
     logger.debug(`Count query took ${countEnd - countStart}ms`);
     const filteredCount = countResult?.count || 0;
@@ -674,12 +667,12 @@ export default class Eval {
       `SELECT DISTINCT test_idx FROM eval_results WHERE ${whereSql} ORDER BY test_idx LIMIT ${limit} OFFSET ${offset}`,
     );
     const idxStart = Date.now();
-    const rows = await db.all<TestIndexRow>(idxQuery);
+    const rows = (await db.all(idxQuery)) as TestIndexRow[];
     const idxEnd = Date.now();
     logger.debug(`Index query took ${idxEnd - idxStart}ms`);
 
     // Get all test indices from the rows
-    const testIndices = rows.map((row) => row.test_idx);
+    const testIndices = rows.map((row: TestIndexRow) => row.test_idx);
 
     return { testIndices, filteredCount };
   }
@@ -792,16 +785,26 @@ export default class Eval {
   async addPrompts(prompts: CompletedPrompt[]) {
     this.prompts = prompts;
     if (this.persisted) {
-      const db = getDb();
-      await db.update(evalsTable).set({ prompts }).where(eq(evalsTable.id, this.id)).run();
+      if (shouldUseMysql()) {
+        const db = await getDbAsync();
+        await db.update(evalsTable).set({ prompts }).where(eq(evalsTable.id, this.id));
+      } else {
+        const db = getDb();
+        await db.update(evalsTable).set({ prompts }).where(eq(evalsTable.id, this.id)).run();
+      }
     }
   }
 
   async setResults(results: EvalResult[]) {
     this.results = results;
     if (this.persisted) {
-      const db = getDb();
-      await db.insert(evalResultsTable).values(results.map((r) => ({ ...r, evalId: this.id })));
+      if (shouldUseMysql()) {
+        const db = await getDbAsync();
+        await executeInsertWithConflictHandling(db.insert(evalResultsTable).values(results.map((r) => ({ ...r, evalId: this.id }))));
+      } else {
+        const db = getDb();
+        await executeInsertWithConflictHandling(db.insert(evalResultsTable).values(results.map((r) => ({ ...r, evalId: this.id }))));
+      }
     }
     this._resultsLoaded = true;
   }
@@ -894,13 +897,12 @@ export default class Eval {
   }
 
   async delete() {
-    const db = getDb();
-    db.transaction(() => {
-      db.delete(evalsToDatasetsTable).where(eq(evalsToDatasetsTable.evalId, this.id)).run();
-      db.delete(evalsToPromptsTable).where(eq(evalsToPromptsTable.evalId, this.id)).run();
-      db.delete(evalsToTagsTable).where(eq(evalsToTagsTable.evalId, this.id)).run();
-      db.delete(evalResultsTable).where(eq(evalResultsTable.evalId, this.id)).run();
-      db.delete(evalsTable).where(eq(evalsTable.id, this.id)).run();
+    await withTransaction(async (db) => {
+      await db.delete(evalsToDatasetsTable).where(eq(evalsToDatasetsTable.evalId, this.id));
+      await db.delete(evalsToPromptsTable).where(eq(evalsToPromptsTable.evalId, this.id));
+      await db.delete(evalsToTagsTable).where(eq(evalsToTagsTable.evalId, this.id));
+      await db.delete(evalResultsTable).where(eq(evalResultsTable.evalId, this.id));
+      await db.delete(evalsTable).where(eq(evalsTable.id, this.id));
     });
   }
 
@@ -928,7 +930,7 @@ export async function getEvalSummaries(
 ): Promise<EvalSummary[]> {
   const db = getDb();
 
-  const whereClauses = [];
+  const whereClauses: any[] = [];
 
   if (datasetId) {
     whereClauses.push(eq(evalsToDatasetsTable.datasetId, datasetId));
@@ -964,14 +966,14 @@ export async function getEvalSummaries(
    * - Test statistics are derived from the prompt metrics as this is the only reliable source of truth
    * that's written to the evals table.
    */
-  return results.map((result) => {
+  return results.map((result: any) => {
     const passCount =
-      result.prompts?.reduce((memo, prompt) => {
+      result.prompts?.reduce((memo: number, prompt: CompletedPrompt) => {
         return memo + (prompt.metrics?.testPassCount ?? 0);
       }, 0) ?? 0;
 
     // All prompts should have the same number of test cases:
-    const testCounts = result.prompts?.map((p) => {
+    const testCounts = result.prompts?.map((p: CompletedPrompt) => {
       return (
         (p.metrics?.testPassCount ?? 0) +
         (p.metrics?.testFailCount ?? 0) +
@@ -986,7 +988,7 @@ export async function getEvalSummaries(
     const testRunCount = testCount * (result.prompts?.length ?? 0);
 
     // Construct an array of providers
-    const deserializedProviders = [];
+    const deserializedProviders: Array<{ id: string; label: string | null }> = [];
     const providers = result.config.providers;
 
     if (includeProviders) {
@@ -997,7 +999,7 @@ export async function getEvalSummaries(
           label: null,
         });
       } else if (Array.isArray(providers)) {
-        providers.forEach((p) => {
+        providers.forEach((p: any) => {
           if (typeof p === 'string') {
             // `providers: string[]`
             deserializedProviders.push({
@@ -1011,7 +1013,7 @@ export async function getEvalSummaries(
             if (keys.length === 1 && !('id' in p)) {
               // This is a declarative provider
               const providerId = keys[0];
-              const providerConfig = (p as any)[providerId];
+              const providerConfig = p[providerId];
               deserializedProviders.push({
                 id: providerId,
                 label: providerConfig.label ?? null,
@@ -1019,8 +1021,8 @@ export async function getEvalSummaries(
             } else {
               // `providers: ProviderOptions[]` with explicit id
               deserializedProviders.push({
-                id: (p as any).id ?? 'unknown',
-                label: (p as any).label ?? null,
+                id: p.id ?? 'unknown',
+                label: p.label ?? null,
               });
             }
           }

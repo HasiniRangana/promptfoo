@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 
 import { eq, lt } from 'drizzle-orm';
 import { getDb } from '../database/index';
-import { spansTable, tracesTable } from '../database/tables';
+import { spansTable, tracesTable } from '../database/dynamic-tables';
 import logger from '../logger';
 
 import type { TraceData } from '../types/tracing';

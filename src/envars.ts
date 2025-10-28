@@ -66,6 +66,21 @@ type EnvVars = {
   PROMPTFOO_TELEMETRY_DEBUG?: boolean;
   PROMPTFOO_TRACING_ENABLED?: boolean;
   PROMPTFOO_ENABLE_UNBLOCKING?: boolean;
+  PROMPTFOO_USE_MYSQL?: boolean;
+
+  //=========================================================================
+  // Database configuration
+  //=========================================================================
+  PROMPTFOO_MYSQL_HOST?: string;
+  PROMPTFOO_MYSQL_PORT?: string;
+  PROMPTFOO_MYSQL_USER?: string;
+  PROMPTFOO_MYSQL_PASSWORD?: string;
+  PROMPTFOO_MYSQL_DATABASE?: string;
+  PROMPTFOO_MYSQL_SSL?: string;
+  PROMPTFOO_MYSQL_SSL_REJECT_UNAUTHORIZED?: string;
+  PROMPTFOO_MYSQL_SSL_CA?: string;
+  PROMPTFOO_MYSQL_SSL_CERT?: string;
+  PROMPTFOO_MYSQL_SSL_KEY?: string;
 
   //=========================================================================
   // promptfoo configuration options

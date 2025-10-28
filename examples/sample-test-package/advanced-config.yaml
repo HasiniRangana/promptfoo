@@ -1,0 +1,269 @@
+# Advanced Test Configuration
+# This demonstrates more complex testing scenarios
+
+description: "Advanced Promptfoo Test Configuration - Complex scenarios and custom assertions"
+
+# Import custom assertions
+defaultTest:
+  options:
+    transform: |
+      output.trim()
+
+# Advanced prompts with complex logic
+prompts:
+  - id: "customer-service-bot"
+    content: |
+      You are a customer service representative for TechCorp, a software company.
+      
+      Customer Message: {{customer_message}}
+      Customer Sentiment: {{sentiment}}
+      Issue Category: {{category}}
+      
+      Respond professionally and helpfully. Match the tone to the customer's sentiment:
+      - If positive/neutral: Be friendly and informative
+      - If negative: Be empathetic and solution-focused
+      
+      Response:
+
+  - id: "code-reviewer"
+    content: |
+      You are an experienced software engineer conducting a code review.
+      
+      Programming Language: {{language}}
+      Code to Review:
+      ```{{language}}
+      {{code}}
+      ```
+      
+      Please provide:
+      1. Overall assessment (good/needs improvement/poor)
+      2. Specific issues found
+      3. Suggestions for improvement
+      4. Security considerations (if any)
+      
+      Review:
+
+  - id: "educational-explainer"
+    content: |
+      You are an educational content creator. Explain the following topic appropriately for your audience.
+      
+      Topic: {{topic}}
+      Audience: {{audience}}
+      Explanation Style: {{style}}
+      
+      Requirements:
+      - Use appropriate language level for the audience
+      - Include relevant examples
+      - Make it engaging and understandable
+      
+      Explanation:
+
+providers:
+  - id: "gpt-4o-mini-creative"
+    openai:gpt-4o-mini:
+      config:
+        temperature: 0.7
+        max_tokens: 800
+
+  - id: "gpt-4o-mini-precise"
+    openai:gpt-4o-mini:
+      config:
+        temperature: 0.1
+        max_tokens: 600
+
+  # Custom provider example
+  - id: "custom-test-provider"
+    file://custom-provider.js:
+      config:
+        id: "custom-test"
+
+tests:
+  # Customer Service Scenarios
+  - description: "Positive customer inquiry"
+    vars:
+      customer_message: "I love your software! Can you tell me about the new features in the latest update?"
+      sentiment: "positive"
+      category: "feature_inquiry"
+    prompts: ["customer-service-bot"]
+    assert:
+      - type: javascript
+        value: file://custom-assertions.js:appropriateSentiment
+        threshold: "positive"
+      - type: javascript
+        value: file://custom-assertions.js:appropriateLength
+        threshold: [20, 150]
+      - type: icontains
+        value: ["thank", "appreciate", "excited"]
+
+  - description: "Frustrated customer complaint"
+    vars:
+      customer_message: "This software is terrible! It keeps crashing and I've lost hours of work!"
+      sentiment: "negative"
+      category: "bug_report"
+    prompts: ["customer-service-bot"]
+    assert:
+      - type: javascript
+        value: file://custom-assertions.js:appropriateSentiment
+        threshold: "negative"
+      - type: icontains
+        value: ["sorry", "understand", "resolve", "help"]
+      - type: not-contains
+        value: ["blame", "fault", "your problem"]
+
+  # Code Review Scenarios
+  - description: "Python code review - good code"
+    vars:
+      language: "python"
+      code: |
+        def calculate_factorial(n):
+            \"\"\"Calculate factorial of a non-negative integer.\"\"\"
+            if not isinstance(n, int) or n < 0:
+                raise ValueError("Input must be a non-negative integer")
+            
+            if n <= 1:
+                return 1
+            
+            result = 1
+            for i in range(2, n + 1):
+                result *= i
+            
+            return result
+    prompts: ["code-reviewer"]
+    assert:
+      - type: javascript
+        value: file://custom-assertions.js:isValidCode
+        threshold: "python"
+      - type: icontains
+        value: ["good", "well", "proper"]
+      - type: contains
+        value: "error handling"
+
+  - description: "JavaScript code review - problematic code"
+    vars:
+      language: "javascript"
+      code: |
+        function getUserData(userId) {
+            var data = localStorage.getItem('users');
+            var users = JSON.parse(data);
+            return users[userId];
+        }
+    prompts: ["code-reviewer"]
+    assert:
+      - type: icontains
+        value: ["error", "issue", "problem", "improve"]
+      - type: icontains
+        value: ["null", "undefined", "validation"]
+      - type: javascript
+        value: |
+          const output_lower = output.toLowerCase();
+          return output_lower.includes('json.parse') || 
+                 output_lower.includes('error handling') ||
+                 output_lower.includes('try-catch');
+
+  # Educational Content Tests
+  - description: "Middle school science explanation"
+    vars:
+      topic: "photosynthesis"
+      audience: "middle school students"
+      style: "simple and engaging"
+    prompts: ["educational-explainer"]
+    providers: ["gpt-4o-mini-creative"]
+    assert:
+      - type: javascript
+        value: file://custom-assertions.js:appropriateLength
+        threshold: [50, 200]
+      - type: icontains
+        value: ["plant", "sunlight", "energy", "oxygen"]
+      - type: not-contains
+        value: ["photosystem", "chloroplast", "ATP synthase"] # Too advanced for middle school
+
+  - description: "Technical university explanation"
+    vars:
+      topic: "machine learning algorithms"
+      audience: "computer science undergraduates"
+      style: "technical but accessible"
+    prompts: ["educational-explainer"]
+    providers: ["gpt-4o-mini-precise"]
+    assert:
+      - type: javascript
+        value: file://custom-assertions.js:appropriateLength
+        threshold: [100, 300]
+      - type: icontains
+        value: ["algorithm", "training", "data", "model"]
+      - type: javascript
+        value: |
+          const output_lower = output.toLowerCase();
+          const technicalTerms = ['supervised', 'unsupervised', 'neural', 'regression', 'classification'];
+          const foundTerms = technicalTerms.filter(term => output_lower.includes(term));
+          return foundTerms.length >= 2; // Should use at least 2 technical terms
+
+  # Multi-provider comparison tests
+  - description: "Creative vs Precise provider comparison"
+    vars:
+      customer_message: "Can you help me understand your pricing plans?"
+      sentiment: "neutral"
+      category: "pricing_inquiry"
+    prompts: ["customer-service-bot"]
+    providers: ["gpt-4o-mini-creative", "gpt-4o-mini-precise"]
+    assert:
+      - type: icontains
+        value: ["pricing", "plan", "cost"]
+      - type: javascript
+        value: file://custom-assertions.js:appropriateLength
+        threshold: [30, 200]
+
+  # Custom provider test
+  - description: "Custom provider functionality"
+    vars:
+      question: "Generate some JSON data"
+    prompts: ["structured-response"]
+    providers: ["custom-test-provider"]
+    assert:
+      - type: contains
+        value: "custom provider"
+      - type: javascript
+        value: "output.length > 10"
+
+# Test with datasets
+datasets:
+  - name: "customer_scenarios"
+    tests:
+      - vars:
+          customer_message: "{{question}}"
+          sentiment: "{{sentiment}}"
+          category: "general"
+        prompts: ["customer-service-bot"]
+        assert:
+          - type: javascript
+            value: file://custom-assertions.js:appropriateSentiment
+            threshold: "{{sentiment}}"
+          - type: javascript
+            value: file://custom-assertions.js:appropriateLength
+            threshold: [20, 200]
+
+# Configuration for different test environments
+env:
+  development:
+    providers:
+      - openai:gpt-3.5-turbo # Cheaper for dev testing
+    evaluateOptions:
+      maxConcurrency: 2
+      
+  production:
+    providers:
+      - openai:gpt-4o
+      - openai:gpt-4o-mini
+    evaluateOptions:
+      maxConcurrency: 5
+      
+# Output and reporting configuration
+outputPath: './advanced-test-results'
+
+sharing:
+  enabled: true
+  apiBaseUrl: https://app.promptfoo.dev
+
+metadata:
+  version: "2.0.0"
+  author: "Advanced Test Suite"
+  tags: ["advanced", "custom-assertions", "multi-provider"]
